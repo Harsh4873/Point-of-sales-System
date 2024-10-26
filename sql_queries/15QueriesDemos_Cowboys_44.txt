@@ -1,0 +1,298 @@
+-- 1. "52 weeks of sales history" (52_weeks_sales_history.sql)
+WITH weekly_orders AS (
+    SELECT 
+        EXTRACT(WEEK FROM time_stamp) AS week_number,
+        time_stamp
+    FROM 
+        orders
+    WHERE 
+        time_stamp >= CURRENT_DATE - INTERVAL '52 weeks'
+)
+SELECT 
+    CONCAT('week ', week_number, ' has ', COUNT(*), ' orders') AS sales_summary
+FROM 
+    weekly_orders
+GROUP BY 
+    week_number
+ORDER BY 
+    week_number;
+
+-- 2. "Realistic sales history" (realistic_sales_history.sql)
+WITH hourly_sales AS (
+    SELECT CASE
+            WHEN EXTRACT(HOUR FROM time_stamp) = 0 THEN '12 AM'
+            WHEN EXTRACT(HOUR FROM time_stamp) < 12 THEN CONCAT(EXTRACT(HOUR FROM time_stamp),' AM')
+            WHEN EXTRACT(HOUR FROM time_stamp) = 12 THEN '12 PM'
+            ELSE CONCAT(EXTRACT(HOUR FROM time_stamp) - 12, ' PM')
+        END AS hour_category,
+        total
+    FROM orders
+)
+SELECT CONCAT(
+        hour_category,
+        ' has ',
+        COUNT(*)::text,
+        ' orders totaling $',
+        TO_CHAR(SUM(total), 'FM999,999,999.00')
+    ) AS sales_summary
+FROM hourly_sales
+GROUP BY hour_category
+ORDER BY SUM(total) DESC;
+
+-- 3. "10 peak days" (peak_days.sql)
+WITH daily_sales AS (
+    SELECT DATE(time_stamp) AS sale_date,
+        SUM(total) AS total_sales
+    FROM orders
+    GROUP BY DATE(time_stamp)
+)
+SELECT CONCAT(
+        TO_CHAR(sale_date, 'DD Month'),
+        ' has $',
+        TO_CHAR(total_sales, 'FM999,999,999.00'),
+        ' of sales'
+    ) AS sales_summary
+FROM daily_sales
+ORDER BY total_sales DESC
+LIMIT 10;
+
+-- 4. "Top 10 Most popular Menu Items" (most_popular_item.sql)
+WITH product_totals AS (
+    SELECT product_name,
+        SUM(quantity) AS total_quantity
+    FROM order_details
+    GROUP BY product_name
+)
+SELECT CONCAT(product_name, ' has ', total_quantity, ' orders') AS product_summary
+FROM product_totals
+ORDER BY total_quantity DESC
+LIMIT 10;
+
+-- 5. "Average order value" (average_order_value.sql)
+SELECT CONCAT(
+    '$ ',
+    ROUND(AVG(total), 2),
+    ' is the average order price'
+)
+FROM orders;
+
+-- 6. "Top 5 menu items by revenue" (top_5_items_by_revenue.sql)
+SELECT CONCAT(
+        product_name,
+        ' has $',
+        TO_CHAR(SUM(quantity * price), 'FM999,999,999.00'),
+        ' in revenue'
+    ) AS revenue_summary
+FROM order_details
+GROUP BY product_name
+ORDER BY SUM(quantity * price) DESC
+LIMIT 5;
+
+-- 7. "Monthly sales trend" (monthly_sales_trend.sql)
+SELECT CONCAT(
+        TO_CHAR(month_start, 'FMMonth'),
+        ' of ',
+        TO_CHAR(month_start, 'YYYY'),
+        ' has $',
+        TO_CHAR(total_sales, 'FM999,999,999.00'),
+        ' revenue and ',
+        order_count,
+        ' orders'
+    ) AS monthly_sales_trend
+FROM (
+        SELECT DATE_TRUNC('month', time_stamp) AS month_start,
+            COUNT(*) AS order_count,
+            SUM(total) AS total_sales
+        FROM orders
+        GROUP BY DATE_TRUNC('month', time_stamp)
+    ) AS monthly_data
+ORDER BY month_start;
+
+-- 8. "Items often ordered together" (items_ordered_together.sql)
+SELECT 
+    CONCAT(
+        od1.product_name,
+        ' and ',
+        od2.product_name,
+        ' were ordered together ',
+        COUNT(*),
+        ' times'
+    ) AS items_ordered_together
+FROM 
+    order_details od1
+JOIN 
+    order_details od2 ON od1.order_id = od2.order_id AND od1.product_name < od2.product_name
+GROUP BY 
+    od1.product_name, od2.product_name
+ORDER BY 
+    COUNT(*) DESC
+LIMIT 10;
+
+-- 9. "Revenue by menu item category" (revenue_by_category.sql)
+SELECT 
+    category || ' $' || TO_CHAR(total_revenue, 'FM999,999,999.00') AS category_revenue
+FROM (
+    SELECT 
+        CASE 
+            WHEN product_name LIKE 'S_%' THEN 'Small:'
+            WHEN product_name LIKE 'M_%' THEN 'Medium:'
+            WHEN product_name LIKE 'L_%' THEN 'Large:'
+            WHEN product_name LIKE 'K_%' THEN 'Kids:'
+            WHEN product_name LIKE 'N_%' THEN 'Normal:'
+            WHEN product_name LIKE 'F_%' THEN 'Family:'
+            ELSE 'Other:'
+        END AS category,
+        SUM(quantity * price) AS total_revenue
+    FROM 
+        order_details
+    GROUP BY 
+        CASE 
+            WHEN product_name LIKE 'S_%' THEN 'Small:'
+            WHEN product_name LIKE 'M_%' THEN 'Medium:'
+            WHEN product_name LIKE 'L_%' THEN 'Large:'
+            WHEN product_name LIKE 'K_%' THEN 'Kids:'
+            WHEN product_name LIKE 'N_%' THEN 'Normal:'
+            WHEN product_name LIKE 'F_%' THEN 'Family:'
+            ELSE 'Other:'
+        END
+) AS category_totals
+ORDER BY 
+    total_revenue DESC;
+
+-- 10. "Busiest hour of the year" (busiest_hour.sql)
+WITH time_blocks AS (
+    SELECT 
+        DATE_TRUNC('day', time_stamp) AS date,
+        CASE 
+            WHEN EXTRACT(HOUR FROM time_stamp) BETWEEN 0 AND 3 THEN '12 AM - 4 AM'
+            WHEN EXTRACT(HOUR FROM time_stamp) BETWEEN 4 AND 7 THEN '4 AM - 8 AM'
+            WHEN EXTRACT(HOUR FROM time_stamp) BETWEEN 8 AND 11 THEN '8 AM - 12 PM'
+            WHEN EXTRACT(HOUR FROM time_stamp) BETWEEN 12 AND 15 THEN '12 PM - 4 PM'
+            WHEN EXTRACT(HOUR FROM time_stamp) BETWEEN 16 AND 19 THEN '4 PM - 8 PM'
+            ELSE '8 PM - 12 AM'
+        END AS time_block,
+        COUNT(*) AS order_count
+    FROM 
+        orders
+    GROUP BY 
+        DATE_TRUNC('day', time_stamp),
+        CASE 
+            WHEN EXTRACT(HOUR FROM time_stamp) BETWEEN 0 AND 3 THEN '12 AM - 4 AM'
+            WHEN EXTRACT(HOUR FROM time_stamp) BETWEEN 4 AND 7 THEN '4 AM - 8 AM'
+            WHEN EXTRACT(HOUR FROM time_stamp) BETWEEN 8 AND 11 THEN '8 AM - 12 PM'
+            WHEN EXTRACT(HOUR FROM time_stamp) BETWEEN 12 AND 15 THEN '12 PM - 4 PM'
+            WHEN EXTRACT(HOUR FROM time_stamp) BETWEEN 16 AND 19 THEN '4 PM - 8 PM'
+            ELSE '8 PM - 12 AM'
+        END
+)
+SELECT 
+    CONCAT(
+        TO_CHAR(date, 'Month DD, YYYY'), 
+        ' from ', 
+        time_block, 
+        ' was the busiest with ', 
+        order_count, 
+        ' orders'
+    ) AS busiest_time_block
+FROM 
+    time_blocks
+ORDER BY 
+    order_count DESC
+LIMIT 1;
+
+
+-- 11. Top 5 customers by revenue and order count, including order count (top_5_customers.sql)
+
+SELECT 
+    CONCAT(
+        name,
+        ' has ordered ',
+        order_count,
+        ' times and spent $',
+        TO_CHAR(total_spent, 'FM999,999,999.00'),
+        ' in total.'
+    ) AS top_customers
+FROM (
+    SELECT 
+        name,
+        SUM(total) AS total_spent,
+        COUNT(*) AS order_count
+    FROM 
+        orders
+    GROUP BY 
+        name
+    ORDER BY 
+        order_count DESC
+    LIMIT 5
+) AS top_customers;
+
+-- 12. 10 Most Popular Items on Peak Day from order_details to help decide inventory for game day (peak_day_inventory.sql)
+WITH peak_day AS (
+    SELECT DATE(time_stamp) AS order_date
+    FROM orders
+    GROUP BY DATE(time_stamp)
+    ORDER BY COUNT(*) DESC
+    LIMIT 1
+),
+popular_items AS (
+    SELECT 
+        od.product_name,
+        SUM(od.quantity) AS total_quantity
+    FROM 
+        order_details od
+    JOIN 
+        orders o ON od.order_id = o.order_id
+    JOIN 
+        peak_day pd ON DATE(o.time_stamp) = pd.order_date
+    GROUP BY 
+        od.product_name
+    ORDER BY 
+        total_quantity DESC
+    LIMIT 10
+)
+SELECT 
+    CONCAT(
+        product_name,
+        ' was ordered ',
+        total_quantity,
+        ' times on the peak day'
+    ) AS popular_item_summary
+FROM 
+    popular_items
+ORDER BY 
+    total_quantity DESC;
+
+-- 13. Gives count of how many distinct items appear within each entree, side, and extra menu item (inventory_for_menu.sql)
+SELECT CONCAT(
+        REPLACE(product_name, 'L_', ''),
+        ' uses ',
+        COUNT(inventory_name),
+        ' items'
+    ) AS product_inventory_summary
+FROM ingredients
+WHERE product_name LIKE 'L%'
+    AND product_name NOT LIKE '%fountain%'
+GROUP BY product_name
+ORDER BY COUNT(inventory_name) DESC;
+
+-- 14. Gives how many times select inventory items appear in each entree, side and extra (inventory_repeated_items.sql)
+SELECT CONCAT(
+        inventory_name,
+        ' used in ',
+        COUNT(DISTINCT product_name),
+        ' recipes'
+    ) AS inventory_usage_summary
+FROM ingredients
+WHERE product_name LIKE 'L%'
+    AND product_name NOT LIKE '%fountain%'
+GROUP BY inventory_name
+ORDER BY COUNT(DISTINCT product_name) DESC;
+
+-- 15. Gives the products that use each ingredient listed in alphabetical order by ingredient (items_using_ingredients.sql)
+SELECT inventory_name AS ingredient,
+    REPLACE(product_name, 'L_', '') as product
+FROM ingredients
+WHERE product_name LIKE 'L%'
+    AND product_name NOT LIKE '%fountain%'
+ORDER BY inventory_name ASC,
+    product_name ASC;
